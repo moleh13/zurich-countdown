@@ -43,8 +43,7 @@ function Segment({ children }: { children: React.ReactNode }) {
 }
 
 function FlipDigits({ value, label }: { value: number; label: string }) {
-  const [prev, setPrev] = useState(value);
-  useEffect(() => setPrev(value), [value]);
+  
 
   const key = String(value);
 
