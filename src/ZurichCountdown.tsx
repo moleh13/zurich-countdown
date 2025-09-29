@@ -2,8 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plane, MapPin, Clock, Calendar, Share2 } from "lucide-react";
 
-// Hedef: 3 Eylül 2025, 08:35 CEST (Zürih)
-const TARGET_ISO = "2025-09-03T08:35:00+02:00"; // +02:00 CEST
+// Hedef: 16 Ekim 2025, 11:35 CEST (Zürih)
+const TARGET_ISO = "2025-10-16T11:35:00+02:00"; // +02:00 CEST
+// Varış: 16 Ekim 2025, 15:25 TRT (İstanbul)
+const ARRIVAL_ISO = "2025-10-16T15:25:00+03:00";
+const FLIGHT_NUMBER = "PC948";
+const CHECKIN_OFFSET_MS = 7 * 24 * 60 * 60 * 1000;
+const ZURICH_TZ = "Europe/Zurich";
+const ISTANBUL_TZ = "Europe/Istanbul";
+const LOCALE = "tr-TR";
 
 function useCountdown(target: Date) {
   const compute = () => {
@@ -109,13 +116,13 @@ function InfoBadge({ icon: Icon, text }: { icon: React.ComponentType<any>; text:
   );
 }
 
-function formatZurichLocal(target: Date) {
+function formatTimeInZone(target: Date, timeZone: string) {
   try {
-    // Date zaten CEST ofseti ile kuruldu, yine de kullanıcıya okunaklı bir metin gösterelim
-    const fmt = new Intl.DateTimeFormat("tr-TR", {
-      dateStyle: "full",
-      timeStyle: "short",
-      timeZone: "Europe/Zurich",
+    const fmt = new Intl.DateTimeFormat(LOCALE, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone,
     });
     return fmt.format(target);
   } catch {
@@ -123,7 +130,25 @@ function formatZurichLocal(target: Date) {
   }
 }
 
-function formatLocal(target: Date) {
+function formatShortDateWithWeekday(target: Date, timeZone: string) {
+  try {
+    const dateFmt = new Intl.DateTimeFormat(LOCALE, {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone,
+    });
+    const weekdayFmt = new Intl.DateTimeFormat(LOCALE, {
+      weekday: "short",
+      timeZone,
+    });
+    return `${dateFmt.format(target)}, ${weekdayFmt.format(target)}`;
+  } catch {
+    return target.toLocaleString();
+  }
+}
+
+function formatDateTimeLocal(target: Date) {
   try {
     const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" });
     return fmt.format(target);
@@ -133,10 +158,9 @@ function formatLocal(target: Date) {
 }
 
 function buildICS(): string {
-  // 2025-09-03 08:35 CEST = 06:35 UTC
   const dtstamp = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-  const DTSTART = "20250903T063500Z";
-  const DTEND = "20250903T073500Z";
+  const departureUtc = new Date(TARGET_ISO).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const arrivalUtc = new Date(ARRIVAL_ISO).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -144,9 +168,9 @@ function buildICS(): string {
     "BEGIN:VEVENT",
     `UID:zurich-countdown-${Date.now()}@local`,
     `DTSTAMP:${dtstamp}`,
-    `DTSTART:${DTSTART}`,
-    `DTEND:${DTEND}`,
-    "SUMMARY:Zürih uçuşu, geri sayım bitti",
+    `DTSTART:${departureUtc}`,
+    `DTEND:${arrivalUtc}`,
+    "SUMMARY:PC948 Zürih ✈ İstanbul (Sabiha Gökçen)",
     "DESCRIPTION:İyi yolculuklar",
     "END:VEVENT",
     "END:VCALENDAR",
@@ -189,9 +213,23 @@ function Confetti({ show }: { show: boolean }) {
 
 export default function ZurichCountdown() {
   const target = useMemo(() => new Date(TARGET_ISO), []);
+  const arrival = useMemo(() => new Date(ARRIVAL_ISO), []);
   const { total, days, hours, minutes, seconds } = useCountdown(target);
   const finished = total <= 0;
   const [copied, setCopied] = useState(false);
+  const checkInOpensAt = useMemo(() => new Date(target.getTime() - CHECKIN_OFFSET_MS), [target]);
+  const departureDateText = formatShortDateWithWeekday(target, ZURICH_TZ);
+  const departureTimeText = formatTimeInZone(target, ZURICH_TZ);
+  const arrivalDateText = formatShortDateWithWeekday(arrival, ISTANBUL_TZ);
+  const arrivalTimeText = formatTimeInZone(arrival, ISTANBUL_TZ);
+  const checkInOpensDateText = formatShortDateWithWeekday(checkInOpensAt, ZURICH_TZ);
+  const checkInOpensTimeText = formatTimeInZone(checkInOpensAt, ZURICH_TZ);
+  const checkInUnlocked = total <= CHECKIN_OFFSET_MS;
+
+  const routeLabel = "Zürih ✈ İstanbul Sabiha Gökçen";
+  const checkInMessage = checkInUnlocked
+    ? "Online check-in açıldı! Pegasus hesabınızdan koltuğunuzu seçebilirsiniz."
+    : "Online check-in uçuşunuza 7 gün kala açılır. Lütfen daha sonra tekrar deneyiniz.";
 
   const icsHref = useMemo(() => {
     const data = buildICS();
@@ -211,9 +249,10 @@ export default function ZurichCountdown() {
       <div className="relative z-10 mx-auto max-w-5xl px-5 pt-10 pb-20">
         {/* Başlık bloğu */}
         <div className="flex flex-col items-center gap-6 text-center">
-          <div className="flex items-center gap-2 text-sm">
-            <InfoBadge icon={MapPin} text="Zürih, İsviçre" />
-            <InfoBadge icon={Clock} text={formatZurichLocal(target)} />
+          <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
+            <InfoBadge icon={Plane} text={`Uçuş No: ${FLIGHT_NUMBER}`} />
+            <InfoBadge icon={MapPin} text={routeLabel} />
+            <InfoBadge icon={Clock} text={`Kalkış ${departureDateText} • ${departureTimeText}`} />
           </div>
 
           <div className="flex items-center gap-3">
@@ -235,10 +274,10 @@ export default function ZurichCountdown() {
             </div>
             <div className="text-left">
               <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">
-                Zürih'e Gidiş, Geri Sayım
+                PC948 Zürih → İstanbul geri sayımı
               </h1>
               <p className="mt-2 text-white/70 max-w-prose">
-                Hedef, 3 Eylül 2025 saat 08:35, Zürih saati. Kemerleri bağla, geri sayım başladı.
+                16 Ekim 2025 Perşembe günü 11:35'te Zürih'ten kalkacak ve 15:25'te İstanbul Sabiha Gökçen'e inecek bu uçuş için her saniye kaydediliyor.
               </p>
             </div>
           </div>
@@ -275,12 +314,54 @@ export default function ZurichCountdown() {
                 <Share2 size={18} /> Bağlantıyı kopyala
               </button>
               <div className="text-xs text-white/60 text-center md:text-right">
-                Hedef, yerel saatine göre {formatLocal(target)} olarak görünebilir.
+                Hedef, yerel saatine göre {formatDateTimeLocal(target)} olarak görünebilir.
               </div>
               {copied && (
                 <div className="text-xs text-emerald-300">Kopyalandı</div>
               )}
             </div>
+          </div>
+
+          <div className="mt-8 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/15 bg-white/8 px-4 py-3 text-left">
+              <div className="text-xs uppercase tracking-[0.3em] text-white/60">Uçuş No</div>
+              <div className="mt-2 text-2xl font-semibold">{FLIGHT_NUMBER}</div>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-white/8 px-4 py-3 text-left">
+              <div className="text-xs uppercase tracking-[0.3em] text-white/60">Uçuş Tarihi</div>
+              <div className="mt-2 text-lg font-semibold">{departureDateText}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/15 bg-gradient-to-b from-white/10 to-transparent px-4 py-4 text-left">
+              <div className="text-xs uppercase tracking-[0.2em] text-white/60">Zürih</div>
+              <div className="mt-1 text-4xl font-bold text-white">{departureTimeText}</div>
+              <div className="mt-2 text-xs text-white/60">Kalkış • {departureDateText}</div>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-gradient-to-b from-white/10 to-transparent px-4 py-4 text-left">
+              <div className="text-xs uppercase tracking-[0.2em] text-white/60">İstanbul Sabiha Gökçen</div>
+              <div className="mt-1 text-4xl font-bold text-white">{arrivalTimeText}</div>
+              <div className="mt-2 text-xs text-white/60">Varış • {arrivalDateText}</div>
+            </div>
+          </div>
+
+          <div
+            className={`mt-4 rounded-2xl border px-4 py-4 text-sm transition-colors ${
+              checkInUnlocked
+                ? "border-emerald-300/50 bg-emerald-500/10 text-emerald-100"
+                : "border-white/15 bg-white/8 text-white/80"
+            }`}
+          >
+            <div className="font-semibold uppercase tracking-[0.2em] text-xs mb-1">
+              Online Check-in
+            </div>
+            <div>{checkInMessage}</div>
+            {!checkInUnlocked && (
+              <div className="mt-2 text-xs text-white/60">
+                Açılış: {checkInOpensDateText} • {checkInOpensTimeText} (Zürih saati)
+              </div>
+            )}
           </div>
 
           {/* İlerleme barı, hedefe yaklaşım */}
